@@ -817,8 +817,14 @@ class VTShell : VTOutputReader::IProcessor, VTInputReader::IProcessor, IVTShell
 					return backspace;
 				}
 
+				#if defined(__APPLE__)
+				const bool mac_ctrl_v_paste = (ctrl && !shift && !alt && KeyEvent.wVirtualKeyCode == 'V');
+				#else
+				const bool mac_ctrl_v_paste = false;
+				#endif
 				if ((ctrl && shift && !alt && KeyEvent.wVirtualKeyCode=='V') ||
-						(!ctrl && shift && !alt && KeyEvent.wVirtualKeyCode==VK_INSERT) ) {
+						(!ctrl && shift && !alt && KeyEvent.wVirtualKeyCode==VK_INSERT) ||
+						mac_ctrl_v_paste) {
 					return StringFromClipboard();
 				}
 
