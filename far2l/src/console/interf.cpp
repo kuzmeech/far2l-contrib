@@ -52,6 +52,87 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "strmix.hpp"
 #include "console.hpp"
 #include "vtshell.h"
+#include "farversion.h"
+
+namespace
+{
+bool IsBuildAgeClockEnabled()
+{
+	static int enabled = -1;
+
+	if (enabled == -1) {
+		const char *env = getenv("FAR2L_BUILD_AGE");
+		enabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+
+	return enabled != 0;
+}
+
+bool ParseBuildDate(tm &build_tm)
+{
+	memset(&build_tm, 0, sizeof(build_tm));
+
+	if (!FAR_BUILD)
+		return false;
+
+	for (const char *p = FAR_BUILD; p[0]; ++p) {
+		if (isdigit((unsigned char)p[0]) && isdigit((unsigned char)p[1]) && isdigit((unsigned char)p[2])
+				&& isdigit((unsigned char)p[3]) && p[4] == '-' && isdigit((unsigned char)p[5])
+				&& isdigit((unsigned char)p[6]) && p[7] == '-' && isdigit((unsigned char)p[8])
+				&& isdigit((unsigned char)p[9])) {
+			const int year = (p[0] - '0') * 1000 + (p[1] - '0') * 100 + (p[2] - '0') * 10 + (p[3] - '0');
+			const int month = (p[5] - '0') * 10 + (p[6] - '0');
+			const int day = (p[8] - '0') * 10 + (p[9] - '0');
+
+			if (month < 1 || month > 12 || day < 1 || day > 31)
+				continue;
+
+			build_tm.tm_year = year - 1900;
+			build_tm.tm_mon = month - 1;
+			build_tm.tm_mday = day;
+			build_tm.tm_isdst = -1;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void FormatBuildAgeClockText(FARString &text)
+{
+	static bool initialized = false;
+	static bool valid = false;
+	static time_t build_time = 0;
+
+	if (!initialized) {
+		tm build_tm{};
+		if (ParseBuildDate(build_tm)) {
+			build_time = mktime(&build_tm);
+			valid = (build_time != static_cast<time_t>(-1));
+		}
+		initialized = true;
+	}
+
+	if (!valid) {
+		text = L"??:??";
+		return;
+	}
+
+	time_t now = time(nullptr);
+	if (now < build_time)
+		now = build_time;
+
+	const uint64_t total_hours = static_cast<uint64_t>((now - build_time) / 3600);
+	const uint64_t days = total_hours / 24;
+	const uint64_t hours = total_hours % 24;
+
+	if (days > 99) {
+		text = L"99:++";
+	} else {
+		text.Format(L"%02u:%02u", static_cast<unsigned int>(days), static_cast<unsigned int>(hours));
+	}
+}
+}  // namespace
 
 BOOL WINAPI CtrlHandler(DWORD CtrlType);
 
@@ -284,6 +365,7 @@ void CheckForPendingCtrlHandleEvent()
 void ShowTime(int ShowAlways)
 {
 	FARString strClockText;
+	const bool show_build_age = IsBuildAgeClockEnabled();
 	static SYSTEMTIME lasttm = {0, 0, 0, 0, 0, 0, 0, 0};
 	SYSTEMTIME tm;
 	WINPORT(GetLocalTime)(&tm);
@@ -296,13 +378,17 @@ void ShowTime(int ShowAlways)
 	}
 
 	if ((!ShowAlways && lasttm.wMinute == tm.wMinute && lasttm.wHour == tm.wHour
-				&& ScreenClockText[2].Char.UnicodeChar == L':')
+				&& (show_build_age || ScreenClockText[2].Char.UnicodeChar == L':'))
 			|| ScreenSaverActive)
 		return;
 
 	ProcessShowClock++;
 	lasttm = tm;
-	strClockText.Format(L"%02d:%02d", tm.wHour, tm.wMinute);
+	if (show_build_age) {
+		FormatBuildAgeClockText(strClockText);
+	} else {
+		strClockText.Format(L"%02d:%02d", tm.wHour, tm.wMinute);
+	}
 	GotoXY(ScrX - 4, 0);
 	// Здесь хрень какая-то получается с ModType - все время не верное значение!
 	Frame *CurFrame = FrameManager->GetCurrentFrame();
